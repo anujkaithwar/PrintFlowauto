@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { copy } from '../i18n';
 import type { Language, PublicConfig, WhatsAppMessageLog } from '../types';
+import { generateQrDataUrl } from '../utils/qrHelper';
 import { createSamplePrintPdf } from '../utils/samplePdf';
 
 interface WhatsAppStationProps {
@@ -46,13 +47,12 @@ export const WhatsAppStation: React.FC<WhatsAppStationProps> = ({
   useEffect(() => {
     void (async () => {
       try {
-        const [qrRes, logsRes] = await Promise.all([
-          fetch(`/api/qr-image?text=${encodeURIComponent(waDeepLink)}`),
+        const [qrUrl, logsRes] = await Promise.all([
+          generateQrDataUrl(waDeepLink),
           fetch(`/api/whatsapp/logs?shop=${encodeURIComponent(config.shopId)}`),
         ]);
-        if (qrRes.ok) {
-          const qData = await qrRes.json();
-          setWaQrUrl(qData.dataUrl || '');
+        if (qrUrl) {
+          setWaQrUrl(qrUrl);
         }
         if (logsRes.ok) {
           const lData = await logsRes.json();

@@ -10,6 +10,7 @@ import {
   type JobSortBy,
   type JobStatusFilter,
 } from '../utils/jobFilters';
+import { generateQrDataUrl } from '../utils/qrHelper';
 
 interface KioskDisplayProps {
   lang: Language;
@@ -68,20 +69,14 @@ export const KioskDisplay: React.FC<KioskDisplayProps> = ({
   useEffect(() => {
     void (async () => {
       try {
-        const [cRes, wRes] = await Promise.all([
-          fetch(`/api/qr-image?text=${encodeURIComponent(counterUrl)}`),
-          fetch(`/api/qr-image?text=${encodeURIComponent(waUrl)}`),
+        const [cUrl, wUrl] = await Promise.all([
+          generateQrDataUrl(counterUrl),
+          generateQrDataUrl(waUrl),
         ]);
-        if (cRes.ok) {
-          const cData = await cRes.json();
-          setCounterQr(cData.dataUrl || '');
-        }
-        if (wRes.ok) {
-          const wData = await wRes.json();
-          setWaQr(wData.dataUrl || '');
-        }
+        if (cUrl) setCounterQr(cUrl);
+        if (wUrl) setWaQr(wUrl);
       } catch {
-        // Ignore transient QR fetch error
+        // Ignore transient QR generation error
       }
     })();
   }, [counterUrl, waUrl]);

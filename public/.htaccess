@@ -1,0 +1,25 @@
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # Preserve Authorization Bearer header on cPanel Apache CGI / PHP-FPM
+  RewriteCond %{HTTP:Authorization} .
+  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+  # Block direct web access to sensitive internal directories and files
+  RewriteRule ^(config|storage|data|dist-server|node_modules|windows-client|android-client)/ - [F,L]
+  RewriteRule ^(\.env|store\.json|composer\.json|package\.json) - [F,L]
+
+  # Route all /api/* requests to PHP backend router (works in root or subfolder)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteRule ^api/(.*)$ api/index.php?_route=/api/$1 [QSA,L]
+
+  # Let existing static files & directories pass through directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # SPA fallback for React frontend
+  RewriteRule ^ index.html [L]
+</IfModule>

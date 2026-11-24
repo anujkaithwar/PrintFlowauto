@@ -28,6 +28,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('print');
   const [selectedShop, setSelectedShop] = useState<string>('');
   const [config, setConfig] = useState<PublicConfig | null>(null);
+  const [configError, setConfigError] = useState<string>('');
   const [queue, setQueue] = useState<PrintJob[]>([]);
   const [liveJobUpdate, setLiveJobUpdate] = useState<PrintJob | null>(null);
   const [liveLog, setLiveLog] = useState<WhatsAppMessageLog | null>(null);
@@ -47,17 +48,41 @@ export default function App() {
         fetch(`/api/public/queue${qParam}`),
       ]);
       if (cfgRes.ok) {
+        const ct = cfgRes.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          setConfigError(
+            lang === 'hi'
+              ? 'बैकएंड API JSON नहीं लौटा रहा है। यदि आप cPanel PHP होस्टिंग पर हैं, तो पहले /install.php चलाएं।'
+              : 'Backend API returned non-JSON response. If hosting on cPanel PHP, please run /install.php first.'
+          );
+          return;
+        }
         const cfg = (await cfgRes.json()) as PublicConfig;
         setConfig(cfg);
+        setConfigError('');
+      } else {
+        setConfigError(
+          lang === 'hi'
+            ? `सर्वर त्रुटि (${cfgRes.status}): कृपया बैकएंड या cPanel /install.php जांचें।`
+            : `Server unavailable (${cfgRes.status}). Check your Node server or run /install.php on cPanel.`
+        );
       }
       if (qRes.ok) {
-        const qData = await qRes.json();
-        setQueue(qData.jobs || []);
+        const qCt = qRes.headers.get('content-type') || '';
+        if (qCt.includes('application/json')) {
+          const qData = await qRes.json();
+          setQueue(qData.jobs || []);
+        }
       }
     } catch {
-      // Offline fallback handled by PWA cache / indicator
+      setConfigError((prev) =>
+        prev ||
+        (lang === 'hi'
+          ? 'सर्वर से कनेक्ट नहीं हो सका। कृपया पुनः प्रयास करें।'
+          : 'Unable to connect to PrintFlow API server.')
+      );
     }
-  }, []);
+  }, [lang]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -121,8 +146,15 @@ export default function App() {
       void loadConfigAndQueue(selectedShop);
     });
 
+    const pollTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadConfigAndQueue(selectedShop);
+      }
+    }, 10000);
+
     return () => {
       es.close();
+      clearInterval(pollTimer);
     };
   }, [loadConfigAndQueue, selectedShop]);
 
@@ -220,9 +252,33 @@ export default function App() {
         )}
 
         {!config ? (
-          <div className="py-24 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
-          </div>
+          configError ? (
+            <div className="max-w-lg mx-auto my-12 rounded-2xl border border-red-200 bg-white p-6 text-center space-y-4">
+              <p className="text-sm font-semibold text-red-800">{configError}</p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setConfigError('');
+                    void loadConfigAndQueue(selectedShop);
+                  }}
+                  className="min-h-[42px] rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 cursor-pointer"
+                >
+                  {lang === 'hi' ? 'पुनः प्रयास करें' : 'Retry Connection'}
+                </button>
+                <a
+                  href="/install.php"
+                  className="min-h-[42px] inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                >
+                  {lang === 'hi' ? 'cPanel Setup (install.php) खोलें' : 'Open cPanel Setup (install.php)'}
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div className="py-24 flex items-center justify-center">
+              <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+            </div>
+          )
         ) : (
           <>
             {activeTab === 'print' && (

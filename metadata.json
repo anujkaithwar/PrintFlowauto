@@ -2,5 +2,7 @@
   "name": "PrintFlow AutoPrint",
   "description": "Automated multi-format print shop web & mobile PWA with QR scan-to-pay, instant auto-print queue, WhatsApp print bot, and complete admin console.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

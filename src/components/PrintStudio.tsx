@@ -25,6 +25,7 @@ import type {
   PrintSides,
   PublicConfig,
 } from '../types';
+import { generateQrDataUrl } from '../utils/qrHelper';
 import { generateJobReceiptPdf } from '../utils/receiptPdf';
 import { createSamplePrintPdf } from '../utils/samplePdf';
 
@@ -99,7 +100,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
         return;
       }
       setActiveJob(data.job);
-      setQrDataUrl(data.qrDataUrl || '');
+      setQrDataUrl(data.qrDataUrl || (data.job?.upiUri ? await generateQrDataUrl(data.job.upiUri) : ''));
     } catch {
       setErrorMsg(lang === 'hi' ? 'जॉब खोजने में समस्या आई।' : 'Unable to look up job.');
     }
@@ -129,7 +130,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
         return;
       }
       setActiveJob(data.job);
-      setQrDataUrl(data.qrDataUrl || '');
+      setQrDataUrl(data.qrDataUrl || (data.job?.upiUri ? await generateQrDataUrl(data.job.upiUri) : ''));
       setUtrInput('');
     } catch {
       setErrorMsg(lang === 'hi' ? 'फाइल अपलोड नहीं हो सकी।' : 'Could not upload file.');
@@ -173,7 +174,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
         return;
       }
       setActiveJob(data.job);
-      setQrDataUrl(data.qrDataUrl || '');
+      setQrDataUrl(data.qrDataUrl || (data.job?.upiUri ? await generateQrDataUrl(data.job.upiUri) : ''));
     } catch {
       setErrorMsg(lang === 'hi' ? 'सेटिंग अपडेट नहीं हो सकी।' : 'Failed to update print options.');
     } finally {

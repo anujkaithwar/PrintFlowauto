@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import { PDFDocument } from 'pdf-lib';
@@ -2124,6 +2125,160 @@ async function startServer() {
     res.sendFile(installerPath);
   });
 
+  // Zero-dependency PKZIP archive builder for one-click cPanel public_html deployment bundle
+  const buildZipArchive = (entries: Array<{ name: string; data: Buffer }>): Buffer => {
+    const crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) {
+        c = (c & 1) !== 0 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      }
+      crcTable[i] = c >>> 0;
+    }
+    const calcCrc32 = (buf: Buffer): number => {
+      let crc = 0xffffffff;
+      for (let i = 0; i < buf.length; i++) {
+        crc = crcTable[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+      }
+      return (crc ^ 0xffffffff) >>> 0;
+    };
+
+    const localParts: Uint8Array[] = [];
+    const centralParts: Uint8Array[] = [];
+    let offset = 0;
+
+    for (const entry of entries) {
+      const normalizedName = entry.name.replace(/\\/g, '/').replace(/^\/+/, '');
+      const nameBuf = Buffer.from(normalizedName, 'utf8');
+      const rawBuf = entry.data;
+      const compressed = zlib.deflateRawSync(rawBuf);
+      const useDeflate = compressed.length < rawBuf.length;
+      const payload = useDeflate ? compressed : rawBuf;
+      const method = useDeflate ? 8 : 0;
+      const crc = calcCrc32(rawBuf);
+
+      const localHeader = Buffer.alloc(30);
+      localHeader.writeUInt32LE(0x04034b50, 0);
+      localHeader.writeUInt16LE(20, 4);
+      localHeader.writeUInt16LE(0x0800, 6); // UTF-8 filename flag
+      localHeader.writeUInt16LE(method, 8);
+      localHeader.writeUInt16LE(0, 10);
+      localHeader.writeUInt16LE(0, 12);
+      localHeader.writeUInt32LE(crc, 14);
+      localHeader.writeUInt32LE(payload.length, 18);
+      localHeader.writeUInt32LE(rawBuf.length, 22);
+      localHeader.writeUInt16LE(nameBuf.length, 26);
+      localHeader.writeUInt16LE(0, 28);
+
+      localParts.push(localHeader, nameBuf, payload);
+
+      const centralHeader = Buffer.alloc(46);
+      centralHeader.writeUInt32LE(0x02014b50, 0);
+      centralHeader.writeUInt16LE(20, 4);
+      centralHeader.writeUInt16LE(20, 6);
+      centralHeader.writeUInt16LE(0x0800, 8);
+      centralHeader.writeUInt16LE(method, 10);
+      centralHeader.writeUInt16LE(0, 12);
+      centralHeader.writeUInt16LE(0, 14);
+      centralHeader.writeUInt32LE(crc, 16);
+      centralHeader.writeUInt32LE(payload.length, 20);
+      centralHeader.writeUInt32LE(rawBuf.length, 24);
+      centralHeader.writeUInt16LE(nameBuf.length, 28);
+      centralHeader.writeUInt16LE(0, 30);
+      centralHeader.writeUInt16LE(0, 32);
+      centralHeader.writeUInt16LE(0, 34);
+      centralHeader.writeUInt16LE(0, 36);
+      centralHeader.writeUInt32LE(0, 38);
+      centralHeader.writeUInt32LE(offset, 42);
+
+      centralParts.push(centralHeader, nameBuf);
+      offset += localHeader.length + nameBuf.length + payload.length;
+    }
+
+    const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0);
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(0, 4);
+    eocd.writeUInt16LE(0, 6);
+    eocd.writeUInt16LE(entries.length, 8);
+    eocd.writeUInt16LE(entries.length, 10);
+    eocd.writeUInt32LE(centralSize, 12);
+    eocd.writeUInt32LE(offset, 16);
+    eocd.writeUInt16LE(0, 20);
+
+    return Buffer.concat([...localParts, ...centralParts, eocd]);
+  };
+
+  app.get('/api/admin/cpanel-package', requireAdmin, (_req, res) => {
+    const distDir = path.resolve(ROOT_DIR, 'dist');
+    const distIndex = path.resolve(distDir, 'index.html');
+    if (!fs.existsSync(distIndex)) {
+      res.status(400).json({
+        error: 'Production build (dist/index.html) not found. Run "npm run build" first.',
+      });
+      return;
+    }
+
+    const entries: Array<{ name: string; data: Buffer }> = [];
+    const seen = new Set<string>();
+    const addEntry = (zipName: string, filePath: string) => {
+      const normalized = zipName.replace(/\\/g, '/').replace(/^\/+/, '');
+      if (seen.has(normalized) || !fs.existsSync(filePath)) return;
+      seen.add(normalized);
+      entries.push({ name: normalized, data: fs.readFileSync(filePath) });
+    };
+    const walkIntoZip = (dir: string, prefix = '') => {
+      if (!fs.existsSync(dir)) return;
+      for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, item.name);
+        const relPath = prefix ? `${prefix}/${item.name}` : item.name;
+        if (item.isDirectory()) {
+          walkIntoZip(fullPath, relPath);
+        } else if (item.isFile()) {
+          addEntry(relPath, fullPath);
+        }
+      }
+    };
+
+    walkIntoZip(distDir);
+    addEntry('.htaccess', path.resolve(ROOT_DIR, 'public', '.htaccess'));
+    addEntry('install.php', path.resolve(ROOT_DIR, 'php-installer', 'install.php'));
+    walkIntoZip(path.resolve(ROOT_DIR, 'windows-client'), 'windows-client');
+    walkIntoZip(path.resolve(ROOT_DIR, 'android-client'), 'android-client');
+
+    const readme = [
+      'PrintFlow AutoPrint — cPanel Deployment Guide',
+      '==============================================',
+      '',
+      'OPTION A: cPanel Shared PHP Hosting (public_html/)',
+      '--------------------------------------------------',
+      '1. Upload and extract this entire ZIP into public_html/ (or a subfolder).',
+      '   Make sure hidden files (.htaccess) are visible/extracted.',
+      '2. Visit https://your-domain.com/install.php in your browser.',
+      '3. Choose SQLite (zero-config) or MySQL/MariaDB, enter Shop & Admin Passcode, and click Install.',
+      '4. Delete install.php after installation completes.',
+      '',
+      'OPTION B: cPanel "Setup Node.js App" (Phusion Passenger)',
+      '--------------------------------------------------------',
+      '1. Upload project source, run "npm install && npm run build" (builds dist/ + dist-server/server.mjs).',
+      '2. Set Application Startup File to: app.cjs',
+      '3. Set NODE_ENV=production and SESSION_SECRET (min 16 chars) in cPanel Env Vars.',
+      '4. Click Restart App in cPanel.',
+      '',
+    ].join('\r\n');
+    entries.push({ name: 'CPANEL-README.txt', data: Buffer.from(readme, 'utf8') });
+
+    const zipBuffer = buildZipArchive(entries);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', String(zipBuffer.length));
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="PrintFlow-cPanel-public_html.zip"'
+    );
+    res.send(zipBuffer);
+  });
+
   // Download pre-configured Windows Installation Client (.ps1) for a specific shop
   app.get('/api/admin/clients/windows', requireAdmin, (req, res) => {
     const templatePath = path.resolve(ROOT_DIR, 'windows-client', 'PrintFlow-Windows-Setup.ps1');
@@ -2201,15 +2356,27 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(ROOT_DIR, 'dist');
+    const indexHtmlPath = path.resolve(distDir, 'index.html');
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distDir, 'index.html'));
+      if (!fs.existsSync(indexHtmlPath)) {
+        res.status(503).send('PrintFlow frontend build (dist/index.html) missing. Run npm run build.');
+        return;
+      }
+      res.sendFile(indexHtmlPath);
     });
   }
 
-  httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`PrintFlow AutoPrint server running on http://0.0.0.0:${PORT}`);
-  });
+  const isPassenger = Boolean(process.env.PASSENGER_APP_ENV || process.env.IN_PASSENGER);
+  if (isPassenger) {
+    httpServer.listen(PORT, () => {
+      console.log(`PrintFlow AutoPrint running under Phusion Passenger (port ${PORT})`);
+    });
+  } else {
+    httpServer.listen(PORT, '0.0.0.0', () => {
+      console.log(`PrintFlow AutoPrint server running on http://0.0.0.0:${PORT}`);
+    });
+  }
 }
 
 startServer().catch((err) => {

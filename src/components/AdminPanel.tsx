@@ -30,6 +30,7 @@ import {
   type JobSortBy,
   type JobStatusFilter,
 } from '../utils/jobFilters';
+import { generateQrDataUrl } from '../utils/qrHelper';
 
 const AdminStatsView = lazy(() =>
   import('./AdminStats').then((mod) => ({ default: mod.AdminStats }))
@@ -210,13 +211,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
           `Hi, I want to print at ${s.settings.shopName}`
         )}`;
         try {
-          const [cRes, wRes] = await Promise.all([
-            fetch(`/api/qr-image?text=${encodeURIComponent(counterUrl)}`),
-            fetch(`/api/qr-image?text=${encodeURIComponent(waUrl)}`),
+          const [cUrl, wUrl] = await Promise.all([
+            generateQrDataUrl(counterUrl),
+            generateQrDataUrl(waUrl),
           ]);
-          const cData = cRes.ok ? await cRes.json() : { dataUrl: '' };
-          const wData = wRes.ok ? await wRes.json() : { dataUrl: '' };
-          nextMap[s.id] = { counter: cData.dataUrl || '', wa: wData.dataUrl || '' };
+          nextMap[s.id] = { counter: cUrl || '', wa: wUrl || '' };
         } catch {
           nextMap[s.id] = { counter: '', wa: '' };
         }
@@ -2136,29 +2135,78 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             </div>
           </div>
 
-          {/* PHP Shared Hosting Installer Card */}
-          <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-1.5 max-w-2xl">
-              <h2 className="text-base font-semibold text-slate-900">
-                {lang === 'hi'
-                  ? 'PHP होस्टिंग इंस्टॉलेशन स्क्रिप्ट (cPanel / Apache / MySQL)'
-                  : 'PHP Hosting Installation Script (cPanel / Apache / MySQL)'}
-              </h2>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                {lang === 'hi'
-                  ? 'यदि आप इसे अपने खुद के PHP 8+ या cPanel सर्वर पर होस्ट करना चाहते हैं, तो install.php डाउनलोड करें, public_html/ में अपलोड करें और ब्राउज़र में खोलें।'
-                  : 'Download install.php and upload it to your PHP 8+ / cPanel public_html directory for automated database, security, and API setup.'}
-              </p>
+          {/* cPanel Hosting Package & PHP Installer Card */}
+          <div className="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <div className="space-y-1.5 max-w-2xl">
+                <h2 className="text-base font-semibold text-slate-900">
+                  {lang === 'hi'
+                    ? 'cPanel होस्टिंग पैकेज (PHP Shared Hosting व Node.js App)'
+                    : 'cPanel Hosting Deployment (PHP Shared Hosting & Node.js App)'}
+                </h2>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  {lang === 'hi'
+                    ? 'cPanel पर सीधे चलाने के लिए नीचे से पूरा Ready-to-Upload ZIP पैकेज डाउनलोड करें और File Manager में public_html/ के अंदर Extract करके /install.php खोलें।'
+                    : 'Download the complete cPanel public_html ZIP bundle (includes compiled frontend, .htaccess, and full PHP 8+ backend installer). Extract it into public_html/ and visit /install.php.'}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadProtectedFile(
+                      '/api/admin/cpanel-package',
+                      'PrintFlow-cPanel-public_html.zip'
+                    )
+                  }
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>
+                    {lang === 'hi'
+                      ? 'cPanel ZIP पैकेज डाउनलोड करें'
+                      : 'Download cPanel ZIP (public_html)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => void downloadProtectedFile('/api/admin/php-installer', 'install.php')}
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{lang === 'hi' ? 'केवल install.php' : 'install.php Only'}</span>
+                </button>
+              </div>
             </div>
 
-            <button
-              type="button"
-              onClick={() => void downloadProtectedFile('/api/admin/php-installer', 'install.php')}
-              className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-semibold text-white hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              <span>{lang === 'hi' ? 'install.php डाउनलोड करें' : 'Download install.php'}</span>
-            </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-100 text-xs text-slate-600">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1.5">
+                <p className="font-semibold text-slate-900">
+                  {lang === 'hi'
+                    ? 'तरीका 1: Shared PHP Hosting (public_html/)'
+                    : 'Option 1: cPanel Shared PHP Hosting (Recommended)'}
+                </p>
+                <ol className="list-decimal list-inside space-y-1 leading-relaxed">
+                  <li>Download &amp; extract <span className="font-mono">PrintFlow-cPanel-public_html.zip</span> into <span className="font-mono">public_html/</span>.</li>
+                  <li>Open <span className="font-mono">https://yourdomain.com/install.php</span> to set up MySQL or SQLite + full PHP <span className="font-mono">/api/*</span> backend + <span className="font-mono">.htaccess</span>.</li>
+                  <li>Delete <span className="font-mono">install.php</span> after setup completes.</li>
+                </ol>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1.5">
+                <p className="font-semibold text-slate-900">
+                  {lang === 'hi'
+                    ? 'तरीका 2: cPanel Setup Node.js App (Passenger)'
+                    : 'Option 2: cPanel Setup Node.js App (Passenger)'}
+                </p>
+                <ol className="list-decimal list-inside space-y-1 leading-relaxed">
+                  <li>Run <span className="font-mono">npm install &amp;&amp; npm run build</span> on the server.</li>
+                  <li>Set Application Startup File to <span className="font-mono">app.cjs</span> (Node 18/20/22).</li>
+                  <li>Set <span className="font-mono">NODE_ENV=production</span> and restart the Node app in cPanel.</li>
+                </ol>
+              </div>
+            </div>
           </div>
         </div>
       )}
