@@ -2,6 +2,45 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      (function () {
+        try {
+          var d = Object.getOwnPropertyDescriptor(window, 'fetch');
+          if (d && d.get && !d.set && d.configurable) {
+            var currentFetch = d.get.call(window);
+            Object.defineProperty(window, 'fetch', {
+              configurable: true,
+              enumerable: d.enumerable,
+              get: function () { return currentFetch; },
+              set: function (fn) { if (typeof fn === 'function') currentFetch = fn; }
+            });
+          }
+        } catch (_) {}
+
+        function isExtensionError(ev) {
+          if (!ev) return false;
+          var msg = String(ev.message || (ev.reason && ev.reason.message) || '');
+          var src = String(ev.filename || (ev.error && ev.error.stack) || (ev.reason && ev.reason.stack) || '');
+          var isExtSrc = src.indexOf('chrome-extension://') !== -1 || src.indexOf('moz-extension://') !== -1 || src.indexOf('safari-extension://') !== -1;
+          var isFetchSetter = msg.indexOf('Cannot set property fetch') !== -1;
+          return isExtSrc || (isFetchSetter && src === '');
+        }
+
+        window.addEventListener('error', function (ev) {
+          if (isExtensionError(ev)) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (ev) {
+          if (isExtensionError(ev)) {
+            ev.preventDefault();
+            ev.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>PrintFlow AutoPrint — Smart QR & WhatsApp Print Service</title>
     <meta

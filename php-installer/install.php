@@ -7,14 +7,19 @@
 
 declare(strict_types=1);
 
-session_set_cookie_params([
-    'httponly' => true,
-    'samesite' => 'Lax',
-    'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
-]);
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+        || ((int) ($_SERVER['SERVER_PORT'] ?? 0) === 443);
+    session_set_cookie_params([
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure' => $isHttps,
+    ]);
+    session_start();
+}
 
-define('INSTALLER_VERSION', '2.0.0');
+define('INSTALLER_VERSION', '2.1.0');
 define('BASE_DIR', __DIR__);
 define('STORAGE_DIR', BASE_DIR . '/storage');
 define('CONFIG_DIR', BASE_DIR . '/config');
@@ -37,7 +42,7 @@ $isLocked = file_exists(LOCK_FILE);
 $hasPdoDriver = extension_loaded('pdo') && (extension_loaded('pdo_mysql') || extension_loaded('pdo_sqlite'));
 $requirements = [
     [
-        'label' => 'PHP Version (>= 8.0)',
+        'label' => 'PHP Version (>= 8.0 — 8.0 / 8.1 / 8.2 / 8.3 / 8.4+)',
         'ok' => version_compare(PHP_VERSION, '8.0.0', '>='),
         'required' => true,
         'detail' => 'Detected PHP ' . PHP_VERSION,
@@ -257,6 +262,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLocked) {
                 file_put_contents(STORAGE_DIR . '/.htaccess', "Require all denied\n");
                 file_put_contents(CONFIG_DIR . '/.htaccess', "Require all denied\n");
 
+                // Safe upload limits for cPanel PHP 8+ FPM/CGI (never triggers 500 like php_value in .htaccess)
+                $userIni = "upload_max_filesize = 32M\npost_max_size = 32M\nmax_execution_time = 60\n";
+                @file_put_contents(BASE_DIR . '/.user.ini', $userIni);
+                @file_put_contents(API_DIR . '/.user.ini', $userIni);
+
                 // Write root .htaccess for Apache SPA + /api/* routing + Authorization header forwarding
                 $rootHtaccess = <<<'HTACCESS'
 Options -Indexes
@@ -292,7 +302,34 @@ HTACCESS;
 <?php
 declare(strict_types=1);
 
-$configPath = __DIR__ . '/../config/app.php';
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+date_default_timezone_set('UTC');
+
+if (version_compare(PHP_VERSION, '8.0.0', '<')) {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'PHP 8.0 or higher is required. Current: ' . PHP_VERSION]);
+    exit;
+}
+
+set_exception_handler(static function (Throwable $e): void {
+    if (!headers_sent()) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        header('X-Content-Type-Options: nosniff');
+    }
+    echo json_encode(['error' => 'Server error: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+});
+
+define('BASE_DIR', realpath(__DIR__ . '/..') ?: dirname(__DIR__));
+define('UPLOAD_DIR', realpath(BASE_DIR . '/uploads') ?: (BASE_DIR . '/uploads'));
+if (!is_dir(UPLOAD_DIR)) {
+    @mkdir(UPLOAD_DIR, 0755, true);
+}
+
+$configPath = BASE_DIR . '/config/app.php';
 if (!file_exists($configPath)) {
     http_response_code(503);
     header('Content-Type: application/json; charset=utf-8');
@@ -301,20 +338,15 @@ if (!file_exists($configPath)) {
 }
 $config = require $configPath;
 
-$dsn = $config['db_driver'] === 'mysql'
-    ? sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $config['db_host'], $config['db_port'], $config['db_name'])
-    : 'sqlite:' . $config['sqlite_path'];
+$dsn = ($config['db_driver'] ?? 'sqlite') === 'mysql'
+    ? sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', (string) $config['db_host'], (int) $config['db_port'], (string) $config['db_name'])
+    : 'sqlite:' . (string) $config['sqlite_path'];
 
-$pdo = new PDO($dsn, $config['db_user'] ?: null, $config['db_pass'] ?: null, [
+$pdo = new PDO($dsn, !empty($config['db_user']) ? (string) $config['db_user'] : null, !empty($config['db_pass']) ? (string) $config['db_pass'] : null, [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     PDO::ATTR_EMULATE_PREPARES => false,
 ]);
-
-define('UPLOAD_DIR', realpath(__DIR__ . '/../uploads') ?: (__DIR__ . '/../uploads'));
-if (!is_dir(UPLOAD_DIR)) {
-    @mkdir(UPLOAD_DIR, 0755, true);
-}
 
 function sendJson($data, int $status = 200): void {
     http_response_code($status);
@@ -326,21 +358,37 @@ function sendJson($data, int $status = 200): void {
 
 function getJsonBody(): array {
     $raw = file_get_contents('php://input');
-    if (!$raw) return [];
+    if ($raw === false || $raw === '') return [];
     $decoded = json_decode($raw, true);
     return is_array($decoded) ? $decoded : [];
 }
 
 function getBearerToken(): string {
-    $auth = $_SERVER['HTTP_AUTHORIZATION']
+    $auth = (string) (
+        $_SERVER['HTTP_AUTHORIZATION']
         ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-        ?? '';
-    if (!$auth && function_exists('apache_request_headers')) {
+        ?? $_SERVER['REDIRECT_REDIRECT_HTTP_AUTHORIZATION']
+        ?? ''
+    );
+    if ($auth === '' && function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $k => $v) {
+                if (strtolower((string) $k) === 'authorization') {
+                    $auth = (string) $v;
+                    break;
+                }
+            }
+        }
+    }
+    if ($auth === '' && function_exists('apache_request_headers')) {
         $headers = apache_request_headers();
-        foreach ($headers as $k => $v) {
-            if (strtolower((string) $k) === 'authorization') {
-                $auth = (string) $v;
-                break;
+        if (is_array($headers)) {
+            foreach ($headers as $k => $v) {
+                if (strtolower((string) $k) === 'authorization') {
+                    $auth = (string) $v;
+                    break;
+                }
             }
         }
     }
@@ -808,8 +856,13 @@ if (preg_match('#^/api/jobs/([^/]+)/file$#', $route, $m) && $method === 'GET') {
         if ($job['id'] === $id) {
             $path = UPLOAD_DIR . '/' . basename((string) $job['storedFilename']);
             if (!file_exists($path)) sendJson(['error' => 'Stored file no longer exists.'], 404);
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
             header('X-Content-Type-Options: nosniff');
-            header('Content-Type: ' . ($job['mimeType'] ?: 'application/octet-stream'));
+            header('Content-Type: ' . (($job['mimeType'] ?? '') ?: 'application/octet-stream'));
+            $fsize = @filesize($path);
+            if ($fsize !== false) header('Content-Length: ' . (string) $fsize);
             $disp = (($_GET['download'] ?? '') === '1') ? 'attachment' : 'inline';
             $safe = str_replace(['"', "\r", "\n"], '_', (string) $job['originalFilename']);
             header("Content-Disposition: {$disp}; filename=\"{$safe}\"");
@@ -989,6 +1042,39 @@ if ($route === '/api/webhook/whatsapp' && $method === 'GET') {
     sendJson(['error' => 'Forbidden'], 403);
 }
 
+if ($route === '/api/webhook/whatsapp' && $method === 'POST') {
+    $body = getJsonBody();
+    $entries = is_array($body['entry'] ?? null) ? $body['entry'] : [];
+    foreach ($entries as $entry) {
+        $changes = is_array($entry['changes'] ?? null) ? $entry['changes'] : [];
+        foreach ($changes as $ch) {
+            $val = is_array($ch['value'] ?? null) ? $ch['value'] : [];
+            $messages = is_array($val['messages'] ?? null) ? $val['messages'] : [];
+            $contacts = is_array($val['contacts'] ?? null) ? $val['contacts'] : [];
+            $shop = resolveShop($state, '');
+            foreach ($messages as $msg) {
+                $from = substr((string) ($msg['from'] ?? '+919999999999'), 0, 20);
+                $senderName = substr((string) ($contacts[0]['profile']['name'] ?? 'WhatsApp User'), 0, 60);
+                $text = (string) ($msg['text']['body'] ?? $msg['document']['caption'] ?? $msg['image']['caption'] ?? '[Media]');
+                $attach = (string) ($msg['document']['filename'] ?? (($msg['type'] ?? '') === 'image' ? 'whatsapp-image.jpg' : ''));
+                array_unshift($state['whatsappLogs'], [
+                    'id' => bin2hex(random_bytes(8)),
+                    'shopId' => $shop['id'],
+                    'shopName' => $shop['settings']['shopName'],
+                    'direction' => 'inbound',
+                    'phone' => $from,
+                    'senderName' => $senderName,
+                    'text' => $text,
+                    'attachmentName' => $attach ?: null,
+                    'timestamp' => gmdate('c'),
+                ]);
+            }
+        }
+    }
+    saveState($pdo, $config, $state);
+    sendJson(['ok' => true]);
+}
+
 // Auth Routes
 if ($route === '/api/auth/status' && $method === 'GET') {
     $tok = getBearerToken();
@@ -1046,7 +1132,12 @@ if (preg_match('#^/api/agent/jobs/([^/]+)/file$#', $route, $m) && $method === 'G
         if ($job['id'] === $m[1] && $job['shopId'] === $shop['id']) {
             $path = UPLOAD_DIR . '/' . basename((string) $job['storedFilename']);
             if (!file_exists($path)) sendJson(['error' => 'File not found'], 404);
-            header('Content-Type: ' . ($job['mimeType'] ?: 'application/octet-stream'));
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+            header('Content-Type: ' . (($job['mimeType'] ?? '') ?: 'application/octet-stream'));
+            $fsize = @filesize($path);
+            if ($fsize !== false) header('Content-Length: ' . (string) $fsize);
             readfile($path);
             exit;
         }
@@ -1110,10 +1201,10 @@ if ($route === '/api/admin/analytics' && $method === 'GET') {
     $dayBuckets = [];
     $dayIndexMap = [];
     $trendBuckets = [];
-    $todayTs = strtotime('today midnight');
+    $todayTs = strtotime('today midnight') ?: time();
 
     for ($i = $days - 1; $i >= 0; $i--) {
-        $ts = strtotime("-{$i} days", $todayTs);
+        $ts = strtotime("-{$i} days", $todayTs) ?: $todayTs;
         $dk = date('Y-m-d', $ts);
         $lbl = date('M j', $ts);
         $dayIndexMap[$dk] = count($dayBuckets);
@@ -1136,16 +1227,17 @@ if ($route === '/api/admin/analytics' && $method === 'GET') {
 
     $sumRev = 0.0; $sumJobs = 0; $sumPaid = 0; $sumBw = 0; $sumColor = 0;
     foreach ($state['jobs'] as $job) {
-        $cts = strtotime((string) $job['createdAt']);
-        if (!$cts) continue;
+        $cts = strtotime((string) ($job['createdAt'] ?? ''));
+        if ($cts === false) continue;
         $ck = date('Y-m-d', $cts);
         $cIdx = $dayIndexMap[$ck] ?? null;
-        $pages = $job['printStatus'] === 'cancelled' ? 0 : max(0, (int) $job['printablePages'] * max(1, (int) $job['options']['copies']));
-        $pts = strtotime((string) ($job['paidAt'] ?? $job['createdAt'])) ?: $cts;
+        $pages = ($job['printStatus'] ?? '') === 'cancelled' ? 0 : max(0, (int) ($job['printablePages'] ?? 1) * max(1, (int) ($job['options']['copies'] ?? 1)));
+        $paidAtRaw = (string) ($job['paidAt'] ?? $job['createdAt'] ?? '');
+        $pts = ($paidAtRaw !== '' ? strtotime($paidAtRaw) : false) ?: $cts;
         $pk = date('Y-m-d', $pts);
         $pIdx = $dayIndexMap[$pk] ?? null;
-        $isPaid = $job['paymentStatus'] === 'paid';
-        $amt = $isPaid ? (float) $job['pricingBreakdown']['totalAmount'] : 0.0;
+        $isPaid = ($job['paymentStatus'] ?? '') === 'paid';
+        $amt = $isPaid ? (float) ($job['pricingBreakdown']['totalAmount'] ?? 0) : 0.0;
 
         if ($cIdx !== null && isset($shopAcc[$job['shopId']])) {
             $shopAcc[$job['shopId']]['totalJobs'] += 1;
@@ -1338,11 +1430,12 @@ if (preg_match('#^/api/admin/jobs/([^/]+)$#', $route, $m) && $method === 'DELETE
 if ($route === '/api/admin/settings' && $method === 'PUT') {
     requireAdminAuth($config);
     $body = getJsonBody();
-    $targetId = (string) ($body['shopId'] ?? $state['shops'][0]['id']);
+    $targetId = (string) ($body['shopId'] ?? ($state['shops'][0]['id'] ?? ''));
+    $allowedSections = array_flip(['shopName', 'shopTagline', 'shopAddress', 'gstNumber', 'pricing', 'payment', 'printers', 'whatsapp', 'formats', 'loyalty']);
+    $filtered = array_intersect_key($body, $allowedSections);
     foreach ($state['shops'] as &$sh) {
         if ($sh['id'] === $targetId) {
-            unset($body['shopId']);
-            $sh['settings'] = array_replace_recursive($sh['settings'], $body);
+            $sh['settings'] = array_replace_recursive($sh['settings'], $filtered);
             saveState($pdo, $config, $state);
             sendJson(['settings' => $sh['settings'], 'shop' => $sh]);
         }
@@ -1399,7 +1492,8 @@ if ($route === '/api/admin/clients/windows' && $method === 'GET') {
     $tplPath = BASE_DIR . '/windows-client/PrintFlow-Windows-Setup.ps1';
     if (!file_exists($tplPath)) sendJson(['error' => 'Windows client template folder not found in public_html/windows-client.'], 404);
     $san = fn(string $v): string => str_replace(['"', '`', '$', "\r", "\n"], ['', '', '', ' ', ' '], $v);
-    $script = strtr(file_get_contents($tplPath), [
+    $raw = (string) @file_get_contents($tplPath);
+    $script = strtr($raw, [
         '__SERVER_URL__' => $san(getBaseUrl()),
         '__SHOP_ID__' => $san((string) $shop['id']),
         '__SHOP_NAME__' => $san((string) $shop['settings']['shopName']),
@@ -1423,7 +1517,7 @@ if ($route === '/api/admin/clients/android' && $method === 'GET') {
         if (!file_exists($p)) sendJson(['error' => 'AndroidManifest.xml template not found.'], 404);
         header('Content-Type: application/xml; charset=utf-8');
         header('Content-Disposition: attachment; filename="AndroidManifest.xml"');
-        echo str_replace('__SHOP_NAME__', htmlspecialchars((string) $shop['settings']['shopName'], ENT_XML1), file_get_contents($p));
+        echo str_replace('__SHOP_NAME__', htmlspecialchars((string) $shop['settings']['shopName'], ENT_XML1), (string) @file_get_contents($p));
         exit;
     }
     if ($fileType === 'gradle') {
@@ -1439,7 +1533,7 @@ if ($route === '/api/admin/clients/android' && $method === 'GET') {
     $shopUrl = getBaseUrl() . '/?shop=' . urlencode((string) $shop['slug']);
     header('Content-Type: text/plain; charset=utf-8');
     header('Content-Disposition: attachment; filename="MainActivity-' . $shop['slug'] . '.kt"');
-    echo str_replace('__SHOP_URL__', str_replace(['"', '\\', "\r", "\n"], '', $shopUrl), file_get_contents($p));
+    echo str_replace('__SHOP_URL__', str_replace(['"', '\\', "\r", "\n"], '', $shopUrl), (string) @file_get_contents($p));
     exit;
 }
 
