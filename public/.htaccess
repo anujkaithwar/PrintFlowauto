@@ -1,4 +1,13 @@
+DirectoryIndex index.html index.php
 Options -Indexes
+
+<IfModule mod_mime.c>
+  AddType text/javascript .js .mjs
+  AddType text/css .css
+  AddType application/manifest+json .webmanifest
+  AddType image/svg+xml .svg
+  AddType application/json .json
+</IfModule>
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -8,8 +17,8 @@ Options -Indexes
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
   # Block direct web access to sensitive internal directories and files
-  RewriteRule ^(config|storage|data|dist-server|node_modules|windows-client|android-client)/ - [F,L]
-  RewriteRule ^(\.env|store\.json|composer\.json|package\.json) - [F,L]
+  RewriteRule ^(config|storage|data|dist-server|node_modules|windows-client|android-client|src|php-installer)/ - [F,L]
+  RewriteRule ^(\.env|\.npmrc|store\.json|composer\.json|package\.json|package-lock\.json|bun\.lock|app\.cjs|server\.ts|tsconfig\.json|vite\.config\.ts) - [F,L]
 
   # Route all /api/* requests to PHP backend router (works in root or subfolder)
   RewriteCond %{REQUEST_FILENAME} !-f

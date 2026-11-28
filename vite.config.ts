@@ -5,8 +5,10 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
-export default defineConfig(() => {
+export default defineConfig(({ command }) => {
+  const isBuild = command === 'build';
   return {
+    base: isBuild ? './' : '/',
     plugins: [
       react(),
       tailwindcss(),
@@ -14,30 +16,30 @@ export default defineConfig(() => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
         manifest: {
-          id: '/',
+          id: isBuild ? './' : '/',
           name: 'PrintFlow AutoPrint',
           short_name: 'PrintFlow',
           description: 'Automated multi-format print shop with QR payment, auto-print, WhatsApp intake, and admin console.',
           theme_color: '#1D4ED8',
           background_color: '#F8FAFC',
           display: 'standalone',
-          start_url: '/',
-          scope: '/',
+          start_url: isBuild ? './' : '/',
+          scope: isBuild ? './' : '/',
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: isBuild ? 'pwa-192x192.png' : '/pwa-192x192.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: isBuild ? 'pwa-512x512.png' : '/pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: isBuild ? 'pwa-maskable-512x512.png' : '/pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -47,7 +49,7 @@ export default defineConfig(() => {
         workbox: {
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [/\/api\//, /install\.php/],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

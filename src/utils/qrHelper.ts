@@ -1,4 +1,5 @@
 import QRCode from 'qrcode';
+import { apiUrl } from './api';
 
 export async function generateQrDataUrl(text: string, width = 320): Promise<string> {
   try {
@@ -9,7 +10,7 @@ export async function generateQrDataUrl(text: string, width = 320): Promise<stri
     });
   } catch {
     try {
-      const res = await fetch(`/api/qr-image?text=${encodeURIComponent(text)}`);
+      const res = await fetch(apiUrl(`/api/qr-image?text=${encodeURIComponent(text)}`));
       if (res.ok) {
         const data = await res.json();
         return data.dataUrl || '';

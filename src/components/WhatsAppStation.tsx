@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { copy } from '../i18n';
 import type { Language, PublicConfig, WhatsAppMessageLog } from '../types';
+import { apiUrl } from '../utils/api';
 import { generateQrDataUrl } from '../utils/qrHelper';
 import { createSamplePrintPdf } from '../utils/samplePdf';
 
@@ -49,7 +50,7 @@ export const WhatsAppStation: React.FC<WhatsAppStationProps> = ({
       try {
         const [qrUrl, logsRes] = await Promise.all([
           generateQrDataUrl(waDeepLink),
-          fetch(`/api/whatsapp/logs?shop=${encodeURIComponent(config.shopId)}`),
+          fetch(apiUrl(`/api/whatsapp/logs?shop=${encodeURIComponent(config.shopId)}`)),
         ]);
         if (qrUrl) {
           setWaQrUrl(qrUrl);
@@ -83,7 +84,7 @@ export const WhatsAppStation: React.FC<WhatsAppStationProps> = ({
       form.append('name', name);
       form.append('caption', caption);
 
-      const res = await fetch('/api/whatsapp/simulate', {
+      const res = await fetch(apiUrl('/api/whatsapp/simulate'), {
         method: 'POST',
         body: form,
       });

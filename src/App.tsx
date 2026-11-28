@@ -15,6 +15,7 @@ import { PrintStudio } from './components/PrintStudio';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { WhatsAppStation } from './components/WhatsAppStation';
 import { copy } from './i18n';
+import { apiUrl, appPath } from './utils/api';
 import type {
   AppTab,
   Language,
@@ -44,8 +45,8 @@ export default function App() {
     try {
       const qParam = shopSlugOrId ? `?shop=${encodeURIComponent(shopSlugOrId)}` : '';
       const [cfgRes, qRes] = await Promise.all([
-        fetch(`/api/public/config${qParam}`),
-        fetch(`/api/public/queue${qParam}`),
+        fetch(apiUrl(`/api/public/config${qParam}`)),
+        fetch(apiUrl(`/api/public/queue${qParam}`)),
       ]);
       if (cfgRes.ok) {
         const ct = cfgRes.headers.get('content-type') || '';
@@ -110,7 +111,7 @@ export default function App() {
   }, [loadConfigAndQueue]);
 
   useEffect(() => {
-    const es = new EventSource('/api/events');
+    const es = new EventSource(apiUrl('/api/events'));
 
     es.addEventListener('job_created', (evt) => {
       const job = JSON.parse((evt as MessageEvent).data) as PrintJob;
@@ -267,7 +268,7 @@ export default function App() {
                   {lang === 'hi' ? 'पुनः प्रयास करें' : 'Retry Connection'}
                 </button>
                 <a
-                  href="/install.php"
+                  href={appPath('/install.php')}
                   className="min-h-[42px] inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
                 >
                   {lang === 'hi' ? 'cPanel Setup (install.php) खोलें' : 'Open cPanel Setup (install.php)'}

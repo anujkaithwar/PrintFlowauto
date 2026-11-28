@@ -10,6 +10,7 @@ import {
   type JobSortBy,
   type JobStatusFilter,
 } from '../utils/jobFilters';
+import { apiUrl, getAppBasePath } from '../utils/api';
 import { generateQrDataUrl } from '../utils/qrHelper';
 
 interface KioskDisplayProps {
@@ -61,7 +62,7 @@ export const KioskDisplay: React.FC<KioskDisplayProps> = ({
 
   const counterUrl =
     typeof window !== 'undefined'
-      ? `${window.location.origin}/?shop=${encodeURIComponent(config.shopSlug)}&kiosk=counter-1`
+      ? `${window.location.origin}${getAppBasePath()}/?shop=${encodeURIComponent(config.shopSlug)}&kiosk=counter-1`
       : `/?shop=${encodeURIComponent(config.shopSlug)}&kiosk=counter-1`;
   const cleanedNumber = config.whatsapp.businessNumber.replace(/[^0-9]/g, '');
   const waUrl = `https://wa.me/${cleanedNumber}?text=${encodeURIComponent('Hi, I want to print a document')}`;
@@ -85,7 +86,7 @@ export const KioskDisplay: React.FC<KioskDisplayProps> = ({
     if (!autoOpenPrintSheet || !autoDispatchJobId) return;
     const frame = dispatchFrameRef.current;
     if (!frame) return;
-    frame.src = `/api/jobs/${autoDispatchJobId}/file`;
+    frame.src = apiUrl(`/api/jobs/${autoDispatchJobId}/file`);
     frame.onload = () => {
       try {
         frame.contentWindow?.focus();

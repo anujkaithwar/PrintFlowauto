@@ -25,6 +25,7 @@ import type {
   PrintSides,
   PublicConfig,
 } from '../types';
+import { apiUrl } from '../utils/api';
 import { generateQrDataUrl } from '../utils/qrHelper';
 import { generateJobReceiptPdf } from '../utils/receiptPdf';
 import { createSamplePrintPdf } from '../utils/samplePdf';
@@ -93,7 +94,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
     if (!trimmed) return;
     setErrorMsg('');
     try {
-      const res = await fetch(`/api/jobs/${encodeURIComponent(trimmed)}`);
+      const res = await fetch(apiUrl(`/api/jobs/${encodeURIComponent(trimmed)}`));
       const data = await res.json();
       if (!res.ok) {
         setErrorMsg(data.error || 'Job not found');
@@ -123,7 +124,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
       if (customerName.trim()) form.append('customerName', customerName.trim());
       if (customerPhone.trim()) form.append('customerPhone', customerPhone.trim());
 
-      const res = await fetch('/api/jobs', { method: 'POST', body: form });
+      const res = await fetch(apiUrl('/api/jobs'), { method: 'POST', body: form });
       const data = await res.json();
       if (!res.ok) {
         setErrorMsg(data.error || 'Upload failed');
@@ -163,7 +164,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
     setUpdatingOptions(true);
     setErrorMsg('');
     try {
-      const res = await fetch(`/api/jobs/${activeJob.id}/options`, {
+      const res = await fetch(apiUrl(`/api/jobs/${activeJob.id}/options`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...activeJob.options, ...patch }),
@@ -195,7 +196,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
     }
     setPaying(true);
     try {
-      const res = await fetch(`/api/jobs/${activeJob.id}/pay`, {
+      const res = await fetch(apiUrl(`/api/jobs/${activeJob.id}/pay`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode, utrNumber: utrInput.trim() }),
@@ -224,7 +225,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
     setCheckingLoyalty(true);
     setLoyaltyError('');
     try {
-      const res = await fetch(`/api/loyalty/balance?phone=${encodeURIComponent(raw)}`);
+      const res = await fetch(apiUrl(`/api/loyalty/balance?phone=${encodeURIComponent(raw)}`));
       const data = await res.json();
       if (!res.ok) {
         setLoyaltyError(data.error || 'Unable to check loyalty points.');
@@ -248,7 +249,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
     setLoyaltyError('');
     setClaimingLoyalty(true);
     try {
-      const res = await fetch(`/api/jobs/${activeJob.id}/claim-loyalty`, {
+      const res = await fetch(apiUrl(`/api/jobs/${activeJob.id}/claim-loyalty`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: claimPhoneInput.trim() }),
@@ -651,13 +652,13 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
                 {isImage ? (
                   <img
-                    src={`/api/jobs/${activeJob.id}/file`}
+                    src={apiUrl(`/api/jobs/${activeJob.id}/file`)}
                     alt={activeJob.originalFilename}
                     className="w-full max-h-72 object-contain mx-auto bg-white"
                   />
                 ) : isPdf ? (
                   <iframe
-                    src={`/api/jobs/${activeJob.id}/file#toolbar=0`}
+                    src={apiUrl(`/api/jobs/${activeJob.id}/file#toolbar=0`)}
                     title={activeJob.originalFilename}
                     className="w-full h-72 bg-white"
                   />
@@ -675,7 +676,7 @@ export const PrintStudio: React.FC<PrintStudioProps> = ({
               {/* Hidden iframe used for instant browser print dispatch */}
               <iframe
                 ref={printFrameRef}
-                src={`/api/jobs/${activeJob.id}/file`}
+                src={apiUrl(`/api/jobs/${activeJob.id}/file`)}
                 title="print-dispatch-frame"
                 className="hidden"
               />

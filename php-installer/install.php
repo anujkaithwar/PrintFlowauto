@@ -19,8 +19,17 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-define('INSTALLER_VERSION', '2.1.0');
-define('BASE_DIR', __DIR__);
+define('INSTALLER_VERSION', '2.3.0');
+$_scriptDir = __DIR__;
+$_runningInInstallerDir = basename($_scriptDir) === 'php-installer'
+    && is_dir(dirname($_scriptDir))
+    && (
+        file_exists(dirname($_scriptDir) . '/index.html')
+        || file_exists(dirname($_scriptDir) . '/dist/index.html')
+        || file_exists(dirname($_scriptDir) . '/package.json')
+    );
+define('RUNNING_IN_PHP_INSTALLER_DIR', $_runningInInstallerDir);
+define('BASE_DIR', $_runningInInstallerDir ? dirname($_scriptDir) : $_scriptDir);
 define('STORAGE_DIR', BASE_DIR . '/storage');
 define('CONFIG_DIR', BASE_DIR . '/config');
 define('UPLOAD_DIR', BASE_DIR . '/uploads');
@@ -39,6 +48,13 @@ $csrfToken = (string) $_SESSION['csrf_token'];
 
 $isLocked = file_exists(LOCK_FILE);
 
+$rootIndexPath = BASE_DIR . '/index.html';
+$distIndexPath = BASE_DIR . '/dist/index.html';
+$rootIndexRaw = file_exists($rootIndexPath) ? (string) @file_get_contents($rootIndexPath) : '';
+$isRawDevIndex = $rootIndexRaw !== '' && strpos($rootIndexRaw, '/src/main.tsx') !== false;
+$hasCompiledRoot = $rootIndexRaw !== '' && !$isRawDevIndex && strpos($rootIndexRaw, 'assets/') !== false;
+$hasDistBuild = file_exists($distIndexPath);
+
 $hasPdoDriver = extension_loaded('pdo') && (extension_loaded('pdo_mysql') || extension_loaded('pdo_sqlite'));
 $requirements = [
     [
@@ -46,6 +62,18 @@ $requirements = [
         'ok' => version_compare(PHP_VERSION, '8.0.0', '>='),
         'required' => true,
         'detail' => 'Detected PHP ' . PHP_VERSION,
+    ],
+    [
+        'label' => 'Built Frontend Bundle (dist / index.html)',
+        'ok' => $hasCompiledRoot || $hasDistBuild,
+        'required' => true,
+        'detail' => $hasCompiledRoot
+            ? 'Compiled production index.html & assets/ ready'
+            : ($hasDistBuild
+                ? 'Compiled dist/ folder detected (will auto-deploy to web root)'
+                : ($isRawDevIndex
+                    ? 'Unbuilt dev index.html (/src/main.tsx) detected without dist/. Upload PrintFlow-cPanel-public_html.zip or run npm run build.'
+                    : 'index.html missing. Upload PrintFlow-cPanel-public_html.zip contents.')),
     ],
     [
         'label' => 'PDO Database Driver (MySQL or SQLite)',
@@ -267,9 +295,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$isLocked) {
                 @file_put_contents(BASE_DIR . '/.user.ini', $userIni);
                 @file_put_contents(API_DIR . '/.user.ini', $userIni);
 
-                // Write root .htaccess for Apache SPA + /api/* routing + Authorization header forwarding
+                // If user uploaded full project (including dist/ + dev index.html) into public_html/, promote dist/ to web root
+                if (!$hasCompiledRoot && $hasDistBuild) {
+                    if ($isRawDevIndex && file_exists($rootIndexPath)) {
+                        @copy($rootIndexPath, BASE_DIR . '/index.dev.html');
+                    }
+                    $copyTree = static function (string $srcDir, string $dstDir) use (&$copyTree): void {
+                        if (!is_dir($dstDir)) {
+                            @mkdir($dstDir, 0755, true);
+                        }
+                        $items = scandir($srcDir);
+                        if (!is_array($items)) return;
+                        foreach ($items as $item) {
+                            if ($item === '.' || $item === '..' || $item === 'install.php' || $item === '.htaccess') continue;
+                            $src = $srcDir . '/' . $item;
+                            $dst = $dstDir . '/' . $item;
+                            if (is_dir($src)) {
+                                $copyTree($src, $dst);
+                            } else {
+                                @copy($src, $dst);
+                            }
+                        }
+                    };
+                    $copyTree(BASE_DIR . '/dist', BASE_DIR);
+                }
+
+                // Write root .htaccess for Apache SPA + /api/* routing + MIME types + Authorization header forwarding
                 $rootHtaccess = <<<'HTACCESS'
+DirectoryIndex index.html index.php
 Options -Indexes
+
+<IfModule mod_mime.c>
+  AddType text/javascript .js .mjs
+  AddType text/css .css
+  AddType application/manifest+json .webmanifest
+  AddType image/svg+xml .svg
+  AddType application/json .json
+</IfModule>
 
 <IfModule mod_rewrite.c>
   RewriteEngine On
@@ -279,8 +341,8 @@ Options -Indexes
   RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
   # Block direct access to internal folders and files
-  RewriteRule ^(config|storage|data|dist-server|node_modules|windows-client|android-client)/ - [F,L]
-  RewriteRule ^(\.env|store\.json|composer\.json|package\.json) - [F,L]
+  RewriteRule ^(config|storage|data|dist-server|node_modules|windows-client|android-client|src|php-installer)/ - [F,L]
+  RewriteRule ^(\.env|\.npmrc|store\.json|composer\.json|package\.json|package-lock\.json|bun\.lock|app\.cjs|server\.ts|tsconfig\.json|vite\.config\.ts) - [F,L]
 
   # Route all /api/* requests to PHP backend router
   RewriteCond %{REQUEST_FILENAME} !-f
@@ -1594,9 +1656,9 @@ PHP;
     <?php if ($installedSuccess || $isLocked): ?>
       <div class="alert alert-ok">
         <strong>Installation Complete &amp; Locked!</strong><br />
-        <code>.htaccess</code>, <code>config/app.php</code>, protected <code>uploads/.htaccess</code>, and full <code>api/index.php</code> backend are active.<br />
-        <strong>Security Step:</strong> Delete <code>install.php</code> from <code>public_html/</code> now.<br />
-        <a class="btn" href="./">Open PrintFlow App</a>
+        <code>.htaccess</code>, <code>config/app.php</code>, protected <code>uploads/.htaccess</code>, and full <code>api/index.php</code> backend are active in <code><?= h(BASE_DIR) ?></code>.<br />
+        <strong>Security Step:</strong> Delete <code><?= RUNNING_IN_PHP_INSTALLER_DIR ? 'php-installer/install.php' : 'install.php' ?></code> now.<br />
+        <a class="btn" href="<?= RUNNING_IN_PHP_INSTALLER_DIR ? '../' : './' ?>">Open PrintFlow App</a>
       </div>
     <?php else: ?>
       <div class="section">
@@ -1614,6 +1676,18 @@ PHP;
           </div>
         <?php endforeach; ?>
       </div>
+
+      <?php if (!$hasCompiledRoot && !$hasDistBuild): ?>
+        <div class="alert alert-err" style="margin-top: 16px;">
+          <strong>Compiled Frontend (<code>dist/</code>) Not Found in <code><?= h(BASE_DIR) ?></code></strong><br />
+          You uploaded the raw TypeScript source files (<code>index.html</code> points to <code>/src/main.tsx</code>), which cannot run directly on Apache/PHP.<br /><br />
+          <strong>How to fix in 1 minute:</strong>
+          <div style="margin-top: 6px;">
+            1. <strong>Easiest (No build needed):</strong> Open your running PrintFlow app &rarr; <strong>Admin</strong> &rarr; <strong>API &amp; Hosting</strong> &rarr; download <code>PrintFlow-cPanel-public_html.zip</code>, upload &amp; extract it into <code><?= h(BASE_DIR) ?></code>, then refresh this page.<br />
+            2. <strong>Or via Node/NPM (SSH / Local PC):</strong> Run <code>npm install &amp;&amp; npm run build</code> and ensure the generated <code>dist/</code> folder is inside <code><?= h(BASE_DIR) ?></code>, then refresh this page.
+          </div>
+        </div>
+      <?php endif; ?>
 
       <form method="post">
         <input type="hidden" name="csrf_token" value="<?= h($csrfToken) ?>" />

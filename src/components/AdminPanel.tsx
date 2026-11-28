@@ -30,6 +30,7 @@ import {
   type JobSortBy,
   type JobStatusFilter,
 } from '../utils/jobFilters';
+import { apiUrl, getAppBasePath } from '../utils/api';
 import { generateQrDataUrl } from '../utils/qrHelper';
 
 const AdminStatsView = lazy(() =>
@@ -128,7 +129,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   const fetchAuthStatus = useCallback(async (currentToken: string) => {
     try {
-      const res = await fetch('/api/auth/status', {
+      const res = await fetch(apiUrl('/api/auth/status'), {
         headers: currentToken ? { Authorization: `Bearer ${currentToken}` } : {},
       });
       if (res.ok) {
@@ -149,10 +150,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       const scope = queueFilterShopId || selectedShopId || 'all';
       try {
         const [jobsRes, intRes] = await Promise.all([
-          fetch(`/api/admin/jobs?shopId=${encodeURIComponent(scope)}`, {
+          fetch(apiUrl(`/api/admin/jobs?shopId=${encodeURIComponent(scope)}`), {
             headers: { Authorization: `Bearer ${activeToken}` },
           }),
-          fetch('/api/admin/integration-status', {
+          fetch(apiUrl('/api/admin/integration-status'), {
             headers: { Authorization: `Bearer ${activeToken}` },
           }),
         ]);
@@ -205,7 +206,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     void (async () => {
       const nextMap: Record<string, { counter: string; wa: string }> = {};
       for (const s of shops) {
-        const counterUrl = `${window.location.origin}/?shop=${encodeURIComponent(s.slug)}&kiosk=1`;
+        const counterUrl = `${window.location.origin}${getAppBasePath()}/?shop=${encodeURIComponent(s.slug)}&kiosk=1`;
         const waNum = s.settings.whatsapp.businessNumber.replace(/[^0-9]/g, '');
         const waUrl = `https://wa.me/${waNum}?text=${encodeURIComponent(
           `Hi, I want to print at ${s.settings.shopName}`
@@ -230,7 +231,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setAuthLoading(true);
     try {
       const endpoint = authStatus?.configured ? '/api/auth/login' : '/api/auth/setup';
-      const res = await fetch(endpoint, {
+      const res = await fetch(apiUrl(endpoint), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ passcode: passcodeInput }),
@@ -261,7 +262,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setShopError('');
     setCreatingShop(true);
     try {
-      const res = await fetch('/api/admin/shops', {
+      const res = await fetch(apiUrl('/api/admin/shops'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -296,7 +297,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function handleToggleShop(shopId: string) {
     if (!token) return;
-    const res = await fetch(`/api/admin/shops/${shopId}/toggle`, {
+    const res = await fetch(apiUrl(`/api/admin/shops/${shopId}/toggle`), {
       method: 'PATCH',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -308,7 +309,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function handleDeleteShop(shopId: string) {
     if (!token) return;
-    const res = await fetch(`/api/admin/shops/${shopId}`, {
+    const res = await fetch(apiUrl(`/api/admin/shops/${shopId}`), {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -322,7 +323,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function handleRotateAgentKey(shopId: string) {
     if (!token) return;
-    const res = await fetch(`/api/admin/shops/${shopId}/rotate-agent-key`, {
+    const res = await fetch(apiUrl(`/api/admin/shops/${shopId}/rotate-agent-key`), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -336,7 +337,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     action: 'mark_paid' | 'print_now' | 'mark_completed' | 'cancel' | 'reprint'
   ) {
     if (!token) return;
-    await fetch(`/api/admin/jobs/${jobId}/action`, {
+    await fetch(apiUrl(`/api/admin/jobs/${jobId}/action`), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -349,7 +350,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function handleDeleteJob(jobId: string) {
     if (!token) return;
-    await fetch(`/api/admin/jobs/${jobId}`, {
+    await fetch(apiUrl(`/api/admin/jobs/${jobId}`), {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -362,7 +363,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     setSavingSettings(true);
     setSaveNotice('');
     try {
-      const res = await fetch('/api/admin/settings', {
+      const res = await fetch(apiUrl('/api/admin/settings'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -382,7 +383,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function handleChangePasscode() {
     if (!token || newPasscodeInput.trim().length < 4) return;
-    const res = await fetch('/api/auth/change-passcode', {
+    const res = await fetch(apiUrl('/api/auth/change-passcode'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -398,7 +399,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
 
   async function downloadProtectedFile(endpoint: string, fallbackName: string) {
     if (!token) return;
-    const res = await fetch(endpoint, {
+    const res = await fetch(apiUrl(endpoint), {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return;
@@ -419,7 +420,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
   function triggerBrowserPrint(jobId: string) {
     const frame = printFrameRef.current;
     if (!frame) return;
-    frame.src = `/api/jobs/${jobId}/file`;
+    frame.src = apiUrl(`/api/jobs/${jobId}/file`);
     frame.onload = () => {
       try {
         frame.contentWindow?.focus();
@@ -816,7 +817,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                               <Printer className="w-3.5 h-3.5" />
                             </button>
                             <a
-                              href={`/api/jobs/${job.id}/file?download=1`}
+                              href={apiUrl(`/api/jobs/${job.id}/file?download=1`)}
                               className="rounded border border-slate-200 bg-white p-1.5 text-slate-700 hover:bg-slate-100"
                               title="Download"
                             >
@@ -1006,7 +1007,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
             {shops.map((shop) => {
               const counterUrl =
                 typeof window !== 'undefined'
-                  ? `${window.location.origin}/?shop=${encodeURIComponent(shop.slug)}&kiosk=1`
+                  ? `${window.location.origin}${getAppBasePath()}/?shop=${encodeURIComponent(shop.slug)}&kiosk=1`
                   : '';
               const qrSet = shopQrMap[shop.id];
               return (
@@ -2160,13 +2161,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                       'PrintFlow-cPanel-public_html.zip'
                     )
                   }
-                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors whitespace-nowrap cursor-pointer"
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-blue-700 transition-colors whitespace-nowrap cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
                   <span>
                     {lang === 'hi'
-                      ? 'cPanel ZIP पैकेज डाउनलोड करें'
-                      : 'Download cPanel ZIP (public_html)'}
+                      ? 'cPanel PHP ZIP (public_html)'
+                      : 'cPanel PHP ZIP (public_html)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    void downloadProtectedFile(
+                      '/api/admin/cpanel-package?mode=npm-full',
+                      'PrintFlow-cPanel-NodeJS-NPM.zip'
+                    )
+                  }
+                  className="min-h-[44px] inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>
+                    {lang === 'hi'
+                      ? 'Full App + NPM ZIP (Node.js)'
+                      : 'Full App + NPM ZIP (Node.js)'}
                   </span>
                 </button>
 
@@ -2189,21 +2208,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
                     : 'Option 1: cPanel Shared PHP Hosting (Recommended)'}
                 </p>
                 <ol className="list-decimal list-inside space-y-1 leading-relaxed">
-                  <li>Download &amp; extract <span className="font-mono">PrintFlow-cPanel-public_html.zip</span> into <span className="font-mono">public_html/</span>.</li>
-                  <li>Open <span className="font-mono">https://yourdomain.com/install.php</span> to set up MySQL or SQLite + full PHP <span className="font-mono">/api/*</span> backend + <span className="font-mono">.htaccess</span>.</li>
+                  <li>Download &amp; extract <span className="font-mono">PrintFlow-cPanel-public_html.zip</span> into <span className="font-mono">public_html/</span> (contains pre-built <span className="font-mono">index.html</span> + <span className="font-mono">assets/</span> + <span className="font-mono">.htaccess</span> + <span className="font-mono">install.php</span>).</li>
+                  <li>Open <span className="font-mono">https://yourdomain.com/install.php</span> to configure SQLite/MySQL &amp; full PHP 8+ <span className="font-mono">/api/*</span> backend.</li>
                   <li>Delete <span className="font-mono">install.php</span> after setup completes.</li>
                 </ol>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-1.5">
                 <p className="font-semibold text-slate-900">
                   {lang === 'hi'
-                    ? 'तरीका 2: cPanel Setup Node.js App (Passenger)'
-                    : 'Option 2: cPanel Setup Node.js App (Passenger)'}
+                    ? 'तरीका 2: cPanel Setup Node.js App (NPM Files Included)'
+                    : 'Option 2: cPanel Setup Node.js App (NPM Files Included)'}
                 </p>
                 <ol className="list-decimal list-inside space-y-1 leading-relaxed">
-                  <li>Run <span className="font-mono">npm install &amp;&amp; npm run build</span> on the server.</li>
-                  <li>Set Application Startup File to <span className="font-mono">app.cjs</span> (Node 18/20/22).</li>
-                  <li>Set <span className="font-mono">NODE_ENV=production</span> and restart the Node app in cPanel.</li>
+                  <li>Extract <span className="font-mono">PrintFlow-cPanel-NodeJS-NPM.zip</span> (includes <span className="font-mono">package.json</span>, <span className="font-mono">package-lock.json</span>, <span className="font-mono">.npmrc</span>, <span className="font-mono">app.cjs</span>, source &amp; pre-built <span className="font-mono">dist/</span>).</li>
+                  <li>Click <strong>Run NPM Install</strong> in cPanel &amp; set Startup File to <span className="font-mono">app.cjs</span>.</li>
+                  <li>Set <span className="font-mono">NODE_ENV=production</span> and restart the Node app.</li>
                 </ol>
               </div>
             </div>

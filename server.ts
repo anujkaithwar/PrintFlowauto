@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -2209,12 +2210,26 @@ async function startServer() {
     return Buffer.concat([...localParts, ...centralParts, eocd]);
   };
 
-  app.get('/api/admin/cpanel-package', requireAdmin, (_req, res) => {
+  app.get('/api/admin/cpanel-package', requireAdmin, (req, res) => {
+    const mode = String(req.query.mode || 'php').trim();
     const distDir = path.resolve(ROOT_DIR, 'dist');
     const distIndex = path.resolve(distDir, 'index.html');
+    const distServerEntry = path.resolve(ROOT_DIR, 'dist-server', 'server.mjs');
+
+    if (!fs.existsSync(distIndex) || (mode === 'npm-full' && !fs.existsSync(distServerEntry))) {
+      try {
+        execSync('npm run build', { cwd: ROOT_DIR, stdio: 'pipe', timeout: 120000 });
+      } catch (err) {
+        res.status(500).json({
+          error: `Automatic production build failed: ${err instanceof Error ? err.message : 'Build error'}`,
+        });
+        return;
+      }
+    }
+
     if (!fs.existsSync(distIndex)) {
-      res.status(400).json({
-        error: 'Production build (dist/index.html) not found. Run "npm run build" first.',
+      res.status(500).json({
+        error: 'Production build (dist/index.html) could not be generated.',
       });
       return;
     }
@@ -2230,6 +2245,7 @@ async function startServer() {
     const walkIntoZip = (dir: string, prefix = '') => {
       if (!fs.existsSync(dir)) return;
       for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (item.name === 'node_modules' || item.name === '.git' || item.name === 'dev-dist' || item.name === 'aistudio') continue;
         const fullPath = path.join(dir, item.name);
         const relPath = prefix ? `${prefix}/${item.name}` : item.name;
         if (item.isDirectory()) {
@@ -2240,11 +2256,39 @@ async function startServer() {
       }
     };
 
-    walkIntoZip(distDir);
-    addEntry('.htaccess', path.resolve(ROOT_DIR, 'public', '.htaccess'));
-    addEntry('install.php', path.resolve(ROOT_DIR, 'php-installer', 'install.php'));
-    walkIntoZip(path.resolve(ROOT_DIR, 'windows-client'), 'windows-client');
-    walkIntoZip(path.resolve(ROOT_DIR, 'android-client'), 'android-client');
+    if (mode === 'npm-full') {
+      // Full cPanel Node.js + NPM package (also includes dist/, install.php, and .htaccess)
+      for (const rootFile of [
+        'package.json',
+        'package-lock.json',
+        '.npmrc',
+        'app.cjs',
+        '.env.example',
+        'index.html',
+        'server.ts',
+        'tsconfig.json',
+        'vite.config.ts',
+        'metadata.json',
+      ]) {
+        addEntry(rootFile, path.resolve(ROOT_DIR, rootFile));
+      }
+      addEntry('.htaccess', path.resolve(ROOT_DIR, 'public', '.htaccess'));
+      addEntry('install.php', path.resolve(ROOT_DIR, 'php-installer', 'install.php'));
+      walkIntoZip(path.resolve(ROOT_DIR, 'src'), 'src');
+      walkIntoZip(path.resolve(ROOT_DIR, 'public'), 'public');
+      walkIntoZip(distDir, 'dist');
+      walkIntoZip(path.resolve(ROOT_DIR, 'dist-server'), 'dist-server');
+      walkIntoZip(path.resolve(ROOT_DIR, 'php-installer'), 'php-installer');
+      walkIntoZip(path.resolve(ROOT_DIR, 'windows-client'), 'windows-client');
+      walkIntoZip(path.resolve(ROOT_DIR, 'android-client'), 'android-client');
+    } else {
+      // Ready-to-run cPanel Shared PHP Hosting (public_html/) package
+      walkIntoZip(distDir);
+      addEntry('.htaccess', path.resolve(ROOT_DIR, 'public', '.htaccess'));
+      addEntry('install.php', path.resolve(ROOT_DIR, 'php-installer', 'install.php'));
+      walkIntoZip(path.resolve(ROOT_DIR, 'windows-client'), 'windows-client');
+      walkIntoZip(path.resolve(ROOT_DIR, 'android-client'), 'android-client');
+    }
 
     const readme = [
       'PrintFlow AutoPrint — cPanel Deployment Guide',
@@ -2252,30 +2296,34 @@ async function startServer() {
       '',
       'OPTION A: cPanel Shared PHP Hosting (public_html/)',
       '--------------------------------------------------',
-      '1. Upload and extract this entire ZIP into public_html/ (or a subfolder).',
+      '1. Upload and extract PrintFlow-cPanel-public_html.zip into public_html/ (or a subfolder).',
       '   Make sure hidden files (.htaccess) are visible/extracted.',
       '2. Visit https://your-domain.com/install.php in your browser.',
+      '   Note: If you extracted the Full NPM ZIP into public_html/, install.php will automatically',
+      '   deploy the compiled dist/ files to the web root so the index page renders cleanly.',
       '3. Choose SQLite (zero-config) or MySQL/MariaDB, enter Shop & Admin Passcode, and click Install.',
       '4. Delete install.php after installation completes.',
       '',
-      'OPTION B: cPanel "Setup Node.js App" (Phusion Passenger)',
-      '--------------------------------------------------------',
-      '1. Upload project source, run "npm install && npm run build" (builds dist/ + dist-server/server.mjs).',
-      '2. Set Application Startup File to: app.cjs',
-      '3. Set NODE_ENV=production and SESSION_SECRET (min 16 chars) in cPanel Env Vars.',
-      '4. Click Restart App in cPanel.',
+      'OPTION B: cPanel "Setup Node.js App" (NPM Files Included)',
+      '----------------------------------------------------------',
+      '1. Extract PrintFlow-cPanel-NodeJS-NPM.zip into your Node application root (e.g. /home/user/printflow).',
+      '2. Click "Run NPM Install" in cPanel (uses package.json, package-lock.json & .npmrc).',
+      '3. Set Application Startup File to: app.cjs',
+      '4. Set NODE_ENV=production and SESSION_SECRET (min 16 chars) in cPanel Env Vars.',
+      '5. Restart the Node app in cPanel (dist/ and dist-server/server.mjs are already pre-built!).',
       '',
     ].join('\r\n');
     entries.push({ name: 'CPANEL-README.txt', data: Buffer.from(readme, 'utf8') });
 
     const zipBuffer = buildZipArchive(entries);
+    const zipFilename =
+      mode === 'npm-full'
+        ? 'PrintFlow-cPanel-NodeJS-NPM.zip'
+        : 'PrintFlow-cPanel-public_html.zip';
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Length', String(zipBuffer.length));
-    res.setHeader(
-      'Content-Disposition',
-      'attachment; filename="PrintFlow-cPanel-public_html.zip"'
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${zipFilename}"`);
     res.send(zipBuffer);
   });
 

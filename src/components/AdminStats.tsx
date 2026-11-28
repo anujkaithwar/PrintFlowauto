@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import { BarChart3, Clock, IndianRupee, Loader2, RefreshCw, Store, TrendingUp } from 'lucide-react';
 import type { AdminAnalyticsResponse, Language, ShopConfig } from '../types';
+import { apiUrl } from '../utils/api';
 
 interface AdminStatsProps {
   lang: Language;
@@ -96,7 +97,7 @@ export const AdminStats: React.FC<AdminStatsProps> = ({
     setError('');
     try {
       const res = await fetch(
-        `/api/admin/analytics?days=${days}&shopId=${encodeURIComponent(shopFilter)}`,
+        apiUrl(`/api/admin/analytics?days=${days}&shopId=${encodeURIComponent(shopFilter)}`),
         {
           headers: { Authorization: `Bearer ${token}` },
         }

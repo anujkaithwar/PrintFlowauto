@@ -59,8 +59,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="PrintFlow" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -69,7 +69,54 @@
     />
   </head>
   <body class="bg-slate-50 text-slate-900 antialiased selection:bg-blue-600 selection:text-white">
-    <div id="root"></div>
+    <div id="root">
+      <div id="pf-boot-splash" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,-apple-system,sans-serif;background:#f8fafc;color:#0f172a;">
+        <div style="max-width:480px;width:100%;background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px;text-align:center;">
+          <div style="font-size:16px;font-weight:700;">PrintFlow AutoPrint</div>
+          <p id="pf-boot-status" style="font-size:13px;color:#475569;margin:8px 0 0;">Loading application...</p>
+          <div id="pf-boot-help" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid #e2e8f0;text-align:left;font-size:12px;color:#334155;line-height:1.6;"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function () {
+        var bootErrors = [];
+        window.addEventListener('error', function (ev) {
+          var src = String(ev.filename || (ev.target && ev.target.src) || '');
+          if (src.indexOf('chrome-extension://') !== -1 || src.indexOf('moz-extension://') !== -1) return;
+          if (ev.message) bootErrors.push(ev.message);
+          else if (src) bootErrors.push('Failed to load script: ' + src);
+        }, true);
+
+        setTimeout(function () {
+          var splash = document.getElementById('pf-boot-splash');
+          if (!splash) return;
+          var hasRawTsx = !!document.querySelector('script[src*="/src/main.tsx"]');
+          var statusEl = document.getElementById('pf-boot-status');
+          var helpEl = document.getElementById('pf-boot-help');
+          if (!statusEl || !helpEl) return;
+
+          if (hasRawTsx && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1' && location.port !== '3000') {
+            statusEl.textContent = 'Unbuilt source files detected on hosting.';
+            statusEl.style.color = '#b91c1c';
+            helpEl.style.display = 'block';
+            helpEl.innerHTML =
+              '<strong>Why this page stopped:</strong> You uploaded unbuilt <code>index.html</code> (<code>/src/main.tsx</code>) which browsers cannot run directly on Apache/cPanel.<br/><br/>' +
+              '<strong>Fix:</strong> Extract <code>PrintFlow-cPanel-public_html.zip</code> (built <code>dist/</code> files) into this folder and run <a href="./install.php" style="color:#1d4ed8;font-weight:600;">install.php</a>, or run <code>npm install && npm run build</code>.';
+            return;
+          }
+
+          if (bootErrors.length > 0) {
+            statusEl.textContent = 'Application bundle failed to load.';
+            statusEl.style.color = '#b91c1c';
+            helpEl.style.display = 'block';
+            helpEl.innerHTML =
+              '<strong>Details:</strong> ' + bootErrors[0].replace(/[<>&]/g, '') +
+              '<br/><br/><a href="./install.php" style="color:#1d4ed8;font-weight:600;">Open cPanel Installer (install.php)</a> &middot; <a href="./" style="color:#1d4ed8;font-weight:600;">Reload</a>';
+          }
+        }, 3500);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
